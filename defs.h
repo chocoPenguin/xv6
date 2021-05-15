@@ -9,7 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-
+typedef uint pte_t;
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -120,6 +120,12 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int				getnice(int);
+int				setnice(int pid, int value);
+void			ps(int);
+uint			mmap(uint, int, int, int, int, int);
+int				munmap(uint);
+int				freemem(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -172,6 +178,8 @@ void            uartputc(int);
 
 // vm.c
 void            seginit(void);
+pte_t*			walkpgdir(pde_t*, const void*, int);
+int				mappages(pde_t*, void*, uint, uint, int);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
 char*           uva2ka(pde_t*, char*);

@@ -32,6 +32,11 @@ struct context {
   uint eip;
 };
 
+struct longint {
+  uint front;
+  uint end;
+};
+
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -49,10 +54,33 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  struct longint long_runtime;
+  struct longint long_vruntime;
+  uint nice_value;	       // nice value
+  uint weight;
+  uint runtime;
+  uint vruntime;
+  uint time_slice;
+  uint now_tick;
 };
+
+uint total_weight;
 
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+struct mmap_area {
+	struct file *f;
+	uint addr;
+	int length;
+	int offset;
+	int prot;
+	int flags;
+	struct proc *p;
+};
+
+struct mmap_area ma_array[64];

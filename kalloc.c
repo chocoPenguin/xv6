@@ -8,6 +8,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
+#include "proc.h"
 
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
@@ -21,6 +22,7 @@ struct {
   struct spinlock lock;
   int use_lock;
   struct run *freelist;
+  int free_mem;
 } kmem;
 
 // Initialization happens in two phases.
@@ -33,6 +35,7 @@ kinit1(void *vstart, void *vend)
 {
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
+  kmem.free_mem = 0;
   freerange(vstart, vend);
 }
 
@@ -72,6 +75,7 @@ kfree(char *v)
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;
+  kmem.free_mem++;
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -83,14 +87,21 @@ char*
 kalloc(void)
 {
   struct run *r;
-
+  
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+  kmem.free_mem--;
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
 
+int
+freemem(void)
+{
+	return kmem.free_mem;
+}

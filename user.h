@@ -23,6 +23,12 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int getnice(int);
+int setnice(int pid, int value);
+int ps(int);
+unsigned int mmap(uint, int, int, int, int, int);
+int munmap(uint);
+int freemem(void);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -32,8 +38,8 @@ char* strchr(const char*, char c);
 int strcmp(const char*, const char*);
 void printf(int, const char*, ...);
 char* gets(char*, int max);
-uint strlen(const char*);
-void* memset(void*, int, uint);
+unsigned int strlen(const char*);
+void* memset(void*, int, unsigned int);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);

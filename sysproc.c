@@ -89,3 +89,70 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_getnice(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return getnice(n);
+}
+
+int
+sys_setnice(void)
+{
+  int pid, value;
+
+  if(argint(0, &pid) < 0) return -1;
+
+  argint(1, &value);
+
+  if (value < 0 || value > 39) return -1;
+
+  return setnice(pid, value);
+}
+
+int
+sys_ps(void)
+{
+  int n;
+  argint(0, &n);
+  ps(n);
+  return 0;
+}
+
+unsigned int
+sys_mmap(void)
+{
+	unsigned int addr;
+	int int_addr, len, prot, flags, fd, offset;
+
+	argint(0, &int_addr);
+	addr = (unsigned int)int_addr;
+	argint(1, &len);
+	argint(2, &prot);
+	argint(3, &flags);
+	argint(4, &fd);
+	argint(5, &offset);
+
+	return mmap(addr, len, prot, flags, fd, offset);
+}
+
+int
+sys_munmap(void)
+{
+	unsigned int addr;
+	int int_addr;
+	argint(0, &int_addr);
+	addr = (unsigned int)int_addr;
+
+	return munmap(addr);
+}
+
+int
+sys_freemem(void)
+{
+	return freemem();
+}

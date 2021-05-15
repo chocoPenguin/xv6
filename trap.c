@@ -14,6 +14,51 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int
+page_fault_handler(struct trapframe *tf)
+{
+	int i = 0;
+	struct proc *p = myproc();
+	struct mmap_area *ma = 0;
+
+
+  uint va = rcr2();
+	 //read error : tf->err&2 == 0
+	 //write error : tf->err&2 == 1
+
+  for (int i = 0; i < 64; i++) {
+	if (ma_array[i].addr == va) {
+	  ma = &ma_array[i];		
+	}
+  }
+
+  // No corresponding mmap_area
+  if (i == 64)
+	  return -1;
+
+  int err_code=(tf->err)&2;
+
+  // Case of fault was write and write prohibited
+  if ((err_code == 1) && ma->prot == (PROT_READ|PROT_WRITE))
+	  return -1;
+
+	char* vm_addr=kalloc();
+	memset(vm_addr,0,PGSIZE);
+
+	// Not anonymous
+	if(ma->flags==0){
+		fileread(ma->f,vm_addr,PGSIZE);	
+	}
+
+	if(ma->prot==3)
+		mappages(p->pgdir,(char *)va,PGSIZE,V2P((uint)vm_addr),PTE_P|PTE_U|PTE_W);
+	else 
+		mappages(p->pgdir,(char *)va,PGSIZE,V2P((uint)vm_addr),PTE_P|PTE_U);
+
+
+	return 0;
+}
+
 void
 tvinit(void)
 {
@@ -48,6 +93,11 @@ trap(struct trapframe *tf)
 
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
+    if(myproc() != 0){
+      myproc()->runtime+=1000;
+      myproc()->vruntime=(myproc()->runtime)*1024/(myproc()->weight);
+      myproc()->now_tick+=1000;
+    }
     if(cpuid() == 0){
       acquire(&tickslock);
       ticks++;
@@ -77,6 +127,9 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  case T_PGFLT:
+	page_fault_handler(tf);
+	break;
 
   //PAGEBREAK: 13
   default:
@@ -102,8 +155,7 @@ trap(struct trapframe *tf)
 
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-  if(myproc() && myproc()->state == RUNNING &&
-     tf->trapno == T_IRQ0+IRQ_TIMER)
+  if(myproc() && myproc()->state == RUNNING && myproc()->time_slice <= myproc()->now_tick && tf->trapno == T_IRQ0+IRQ_TIMER)
     yield();
 
   // Check if the process has been killed since we yielded

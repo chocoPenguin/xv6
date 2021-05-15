@@ -7,6 +7,10 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -19,6 +23,17 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+
+int nice_value_to_weight[40] = {
+/*   0 */  88761,	71755,	56483,	46273,	36291,
+/*   5 */  29154,	23254,	18705,	14949,	11916,
+/*  10 */   9548,	7620,	6100,	4904,	3906,
+/*  15 */   3121,	2501,	1991,	1586,	1277,
+/*  20 */   1024,	820,	655,	526,	423,
+/*  25 */    335,	272,	215,	172,	137,
+/*  30 */    110,	87,	70,	56,	45,
+/*  35 */    36,	29,	23,	18,	15};
 
 void
 pinit(void)
@@ -88,6 +103,19 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  
+  p->long_runtime.front = 0;
+  p->long_runtime.end = 0;
+  p->long_vruntime.front = 0;
+  p->long_vruntime.end = 0;
+  p->nice_value = 20;
+  p->weight = 1024;
+  p->runtime = 0;
+  p->vruntime = 0;
+  p->time_slice = 0;
+  p->now_tick = 0;
+  
+  total_weight += p->weight;
 
   release(&ptable.lock);
 
@@ -102,7 +130,7 @@ found:
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
-  // Set up new context to start executing at forkret,
+// Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
   *(uint*)sp = (uint)trapret;
@@ -122,7 +150,7 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
-
+  total_weight = 0;
   p = allocproc();
   
   initproc = p;
@@ -215,6 +243,43 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->vruntime = curproc->vruntime;
+  np->weight = curproc->weight;
+  np->nice_value = curproc->nice_value;
+  np->time_slice = curproc->time_slice;
+  np->now_tick = curproc->now_tick;
+  np->runtime = curproc->runtime;
+
+  // Copy parent's mmap_area to child
+  int parent_ma = -1;
+
+  for (i = 0; i < 64; i++) {
+	  if (ma_array[i].p->pid == curproc->pid) {
+		  parent_ma = i;
+		  break;
+	  }
+  }
+  
+  struct mmap_area *ma = 0;
+
+  if (parent_ma != -1) {
+	  for (i = 0; i < 64; i++) {
+		  if (ma_array[i].addr < 0x40000000) {
+			  ma = &ma_array[i];
+			  break;
+	  	}
+	  }
+
+      ma->f = ma_array[parent_ma].f;
+      ma->addr = ma_array[parent_ma].addr;
+      ma->length = ma_array[parent_ma].length;
+      ma->offset = ma_array[parent_ma].offset;
+      ma->prot = ma_array[parent_ma].prot;
+      ma->flags = ma_array[parent_ma].flags;
+      ma->p = np;
+
+  }
+
 
   release(&ptable.lock);
 
@@ -247,6 +312,8 @@ exit(void)
   end_op();
   curproc->cwd = 0;
 
+  total_weight -= curproc->weight;
+
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
@@ -260,7 +327,7 @@ exit(void)
         wakeup1(initproc);
     }
   }
-
+  
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
@@ -325,33 +392,58 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
+  uint min_vruntime = 4294967295;
+  //struct long_int min_vruntime;
+  //min_vruntime.front = 4294967295;
+  //min_vruntime.end = 4294967295;
+  struct proc *tmp = 0;
+  int flag = 0;
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
+    flag = 0;
+    min_vruntime = 4294967295;
+    //min_vruntime.front = 4294967295;
+    //min_vruntime.end = 4294967295;
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+    
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
+      
+      if (p->vruntime < min_vruntime) {
+      //if (p->long_vruntime.front < min_vruntime.front || (p->long_vruntime.front == min_vruntime.front && p->long_vruntime.end < min_vruntime.end));
+	      min_vruntime = p->vruntime;
+	      //min_vruntime.front = p->long_vruntime.front;
+	      //min_vruntime.end = p->long_vruntime.end;
 
+	      tmp = p;
+	      flag = 1;
+      }
+    }
+
+    if (flag == 1) {
+      tmp->time_slice = 10000*(tmp->weight)/total_weight;
+      tmp->now_tick = 0;
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+      c->proc = tmp;
+      switchuvm(tmp);
+      tmp->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
+      swtch(&(c->scheduler), tmp->context);
       switchkvm();
-
+    
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
 
@@ -531,4 +623,216 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+getnice(int pid)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state != 0 && p->pid == pid)
+      break;
+  }
+
+  release(&ptable.lock);
+  if (p->state != 0) return p->nice_value;
+  else return -1;
+}
+
+int
+setnice(int pid, int value)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+  
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if (p->state != 0 && p->pid == pid) 
+      break;
+  }
+
+  release(&ptable.lock);
+
+  if (p->state != 0) {
+	  p->nice_value = value;
+	  
+	  total_weight -= p->weight;
+	  p->weight = nice_value_to_weight[value];
+	  total_weight += p->weight;
+	  return 0;
+  }
+  else return -1;
+}
+
+void
+ps(int pid)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+  
+  if (pid == 0) {
+    cprintf("name\t\tpid\tstate\t\tpriority\truntime/weight\truntime\t\tvruntime\t\ttick %d\n", ticks*1000);
+
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if (p->state != 0) {
+        cprintf("%s\t\t%d\t", p->name, p->pid);
+
+	if (p->state == 1) cprintf("EMBRYO\t\t");
+        else if (p->state == 2) cprintf("SLEEPING\t");
+        else if (p->state == 3) cprintf("RUNNABLE\t");
+        else if (p->state == 4) cprintf("RUNNING\t\t");
+        else if (p->state == 5) cprintf("ZOMBIE\t\t");
+
+	cprintf("%d\t\t%d\t\t%d\t\t%d\n", p->nice_value, p->runtime/p->weight, p->runtime, p->vruntime);
+      }
+    }
+  }
+
+  else {
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if (p->state != 0 && p->pid == pid) {
+    	cprintf("name\t\tpid\tstate\t\tpriority\truntime/weight\truntime\t\tvruntime\t\ttick %d\n", ticks*1000);
+        cprintf("%s\t\t%d\t", p->name, p->pid);
+
+	if (p->state == 1) cprintf("EMBRYO\t\t");
+        else if (p->state == 2) cprintf("SLEEPING\t");
+        else if (p->state == 3) cprintf("RUNNABLE\t");
+        else if (p->state == 4) cprintf("RUNNING\t\t");
+        else if (p->state == 5) cprintf("ZOMBIE\t\t");
+
+	cprintf("%d\t\t%d\t\t%d\t\t%d\n", p->nice_value, p->runtime/p->weight, p->runtime, p->vruntime);
+        break;
+      }
+    }
+  }
+  
+  release(&ptable.lock);
+  return;
+}
+
+unsigned int 
+mmap(unsigned int _addr, int _len, int prot, int flags, int _fd, int _offset)
+{
+	int fd = _fd;
+	int offset = _offset;
+
+	if (flags == MAP_ANONYMOUS) {
+		fd = -1;
+		offset = 0;
+	}
+
+	int i = 0;
+	int n = 0;
+	int k = 0;
+	uint addr = (uint)PGROUNDDOWN(_addr);
+	int len = (int)PGROUNDDOWN(_len);
+	struct proc *p = myproc();
+	struct file *f = p->ofile[fd];
+	char* dst = (char*)(0x40000000 + addr);
+	char* vm_addr;
+	uint phy_addr;
+	
+	// Failed
+	if (flags != MAP_ANONYMOUS && fd == -1)
+		return -1;
+	else if (prot == PROT_READ && !(f->readable))
+		return -1;
+	else if (prot == (PROT_READ|PROT_WRITE) && !(f->readable))
+		return -1;
+	else if (prot == (PROT_READ|PROT_WRITE) && !(f->writable))
+		return -1;
+	
+	// Flags : 0 (file mapping & recording mapping area)
+	struct mmap_area *ma = 0;
+	
+	for (i = 0; i < 64; i++) {
+		if (ma_array[i].addr < 0x40000000) {
+			ma = &ma_array[i];
+			break;
+		}
+	}
+	
+	ma->f = f;
+	ma->addr = (uint)dst;
+	ma->length = len;
+	ma->offset = offset;
+	ma->prot = prot;
+	ma->flags = flags;
+	ma->p = p;
+
+	f->off=offset;
+
+	n = len / 4096;
+
+	if (flags == MAP_POPULATE) {
+		for (k = 0; k < n; k++) {
+			vm_addr = kalloc();
+		
+			if (vm_addr == 0) panic("kalloc");
+			else phy_addr = V2P((uint)vm_addr);
+
+			memset(vm_addr, 0, PGSIZE);
+			mappages(p->pgdir, dst+4096*k, PGSIZE, phy_addr, PTE_P|PTE_U);
+	
+			fileread(f,vm_addr,PGSIZE);
+		}
+	}
+
+	else if (flags == (MAP_ANONYMOUS|MAP_POPULATE)) {
+		for (k = 0; k < n; k++) {
+			vm_addr = kalloc();
+
+			if (vm_addr == 0) panic("kalloc");
+			else phy_addr = V2P((uint)vm_addr);
+
+			memset(vm_addr, 0, PGSIZE);
+			mappages(p->pgdir, dst+4096*k, PGSIZE, phy_addr, PTE_P|PTE_U);
+		}
+	}
+	
+	return (uint)dst;
+}
+
+int
+munmap(unsigned int _addr) {
+	int i = 0, j = 0, n;
+	pte_t *pte;
+	uint pa;
+	char* va;
+	char* addr = (char*)PGROUNDDOWN(_addr);
+	struct proc *p = myproc();
+
+	for (i = 0; i < 64; i++) {
+		if (ma_array[i].addr == (uint)addr) {
+			// Initialize page table and physical memory
+			pte = walkpgdir(p->pgdir, addr, 0);
+			if (pte != 0) {
+				pa = PTE_ADDR(*pte);
+				va = P2V(pa);
+				n = ma_array[i].length / 4096;
+
+				for (j = 0; j < n; j++) {
+					kfree((char*)((uint)va + 4096 * j));
+				}
+			}
+
+			// Initialize ma_array[i]
+			ma_array[i].addr = 0;
+			ma_array[i].f = 0;
+			ma_array[i].length = 0;
+			ma_array[i].offset = 0;
+			ma_array[i].prot = 0;
+			ma_array[i].flags = 0;
+			ma_array[i].p = 0;
+
+			break;
+		}
+	}
+	
+	if (i == 64)
+		return -1;
+	else
+		return 0;
 }
