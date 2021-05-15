@@ -29,6 +29,9 @@ int ps(int);
 unsigned int mmap(uint, int, int, int, int, int);
 int munmap(uint);
 int freemem(void);
+int swapread(const char*, int);
+int swapwrite(const char*, int);
+int swapstat(int*, int*);
 
 // ulib.c
 int stat(const char*, struct stat*);

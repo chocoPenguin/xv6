@@ -26,6 +26,8 @@ static void itrunc(struct inode*);
 // there should be one superblock per disk device, but we run with
 // only one device
 struct superblock sb; 
+int nr_sectors_read;
+int nr_sectors_write;
 
 // Read the super block.
 void
@@ -83,7 +85,8 @@ bfree(int dev, uint b)
 {
   struct buf *bp;
   int bi, m;
-
+  
+  readsb(dev,&sb);
   bp = bread(dev, BBLOCK(b, sb));
   bi = b % BPB;
   m = 1 << (bi % 8);
@@ -661,6 +664,37 @@ namei(char *path)
 {
   char name[DIRSIZ];
   return namex(path, 0, name);
+}
+
+void swapread(char* ptr,int blkno){
+	struct buf* bp;
+	int i;
+
+	if(blkno<0||blkno>=SWAPMAX/8)
+		panic("swapread: blkno exceed range");
+
+	for(i=0;i<8;i++){
+		nr_sectors_read++;
+		bp=bread(0,blkno*8+SWAPBASE+i);
+		memmove(ptr+i*BSIZE,bp->data,BSIZE);
+		brelse(bp);
+	}
+}
+
+void swapwrite(char* ptr, int blkno){
+	struct buf* bp;
+	int i;
+
+	if(blkno<0||blkno>=SWAPMAX/8)
+		panic("swapread: blkno exceed range");
+
+	for(i=0;i<8;i++){
+		nr_sectors_write++;
+		bp=bread(0,blkno*8+SWAPBASE+i);
+		memmove(bp->data,ptr+i*BSIZE,BSIZE);
+		bwrite(bp);
+		brelse(bp);
+	}
 }
 
 struct inode*

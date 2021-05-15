@@ -26,3 +26,6 @@
 #define SYS_mmap 25
 #define SYS_munmap 26
 #define SYS_freemem 27
+#define SYS_swapread 28
+#define	SYS_swapwrite 29
+#define SYS_swapstat 30
