@@ -26,7 +26,8 @@ static void itrunc(struct inode*);
 // there should be one superblock per disk device, but we run with
 // only one device
 struct superblock sb; 
-
+int nr_sectors_read;
+int nr_sectors_write;
 // Read the super block.
 void
 readsb(int dev, struct superblock *sb)
@@ -84,6 +85,7 @@ bfree(int dev, uint b)
   struct buf *bp;
   int bi, m;
 
+  readsb(dev, &sb);
   bp = bread(dev, BBLOCK(b, sb));
   bi = b % BPB;
   m = 1 << (bi % 8);
@@ -187,7 +189,6 @@ iinit(int dev)
 
 static struct inode* iget(uint dev, uint inum);
 
-//PAGEBREAK!
 // Allocate an inode on device dev.
 // Mark it as allocated by  giving it type type.
 // Returns an unlocked but allocated and referenced inode.
@@ -359,7 +360,6 @@ iunlockput(struct inode *ip)
   iput(ip);
 }
 
-//PAGEBREAK!
 // Inode content
 //
 // The content (data) associated with each inode is stored
@@ -446,7 +446,6 @@ stati(struct inode *ip, struct stat *st)
   st->size = ip->size;
 }
 
-//PAGEBREAK!
 // Read data from inode.
 // Caller must hold ip->lock.
 int
@@ -475,7 +474,6 @@ readi(struct inode *ip, char *dst, uint off, uint n)
   return n;
 }
 
-// PAGEBREAK!
 // Write data to inode.
 // Caller must hold ip->lock.
 int
@@ -510,7 +508,6 @@ writei(struct inode *ip, char *src, uint off, uint n)
   return n;
 }
 
-//PAGEBREAK!
 // Directories
 
 int
@@ -577,7 +574,6 @@ dirlink(struct inode *dp, char *name, uint inum)
   return 0;
 }
 
-//PAGEBREAK!
 // Paths
 
 // Copy the next path element from path into name.
@@ -668,3 +664,38 @@ nameiparent(char *path, char *name)
 {
   return namex(path, 1, name);
 }
+
+void swapread(char* ptr, int blkno)
+{
+	struct buf* bp;
+	int i;
+
+	if ( blkno < 0 || blkno >= SWAPMAX / 8 )
+		panic("swapread: blkno exceed range");
+
+	for ( i=0; i < 8; ++i ) {
+		nr_sectors_read++;
+		bp = bread(0, blkno * 8 + SWAPBASE + i);
+		memmove(ptr + i * BSIZE, bp->data, BSIZE);
+		brelse(bp);
+	}
+}
+
+void swapwrite(char* ptr, int blkno)
+{
+	struct buf* bp;
+	int i;
+
+	if ( blkno < 0 || blkno >= SWAPMAX / 8 )
+		panic("swapread: blkno exceed range");
+
+	for ( i=0; i < 8; ++i ) {
+		nr_sectors_write++;
+		bp = bread(0, blkno * 8 + SWAPBASE + i);
+		memmove(bp->data, ptr + i * BSIZE, BSIZE);
+		bwrite(bp);
+		brelse(bp);
+	}
+}
+
+

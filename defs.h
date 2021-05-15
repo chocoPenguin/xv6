@@ -52,6 +52,9 @@ struct inode*   nameiparent(char*, char*);
 int             readi(struct inode*, char*, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, char*, uint, uint);
+void swapread(char* ptr, int blkno);
+void swapwrite(char* ptr, int blkno);
+
 
 // ide.c
 void            ideinit(void);
@@ -101,7 +104,6 @@ void            pipeclose(struct pipe*, int);
 int             piperead(struct pipe*, char*, int);
 int             pipewrite(struct pipe*, char*, int);
 
-//PAGEBREAK: 16
 // proc.c
 int             cpuid(void);
 void            exit(void);
@@ -185,6 +187,8 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
